@@ -1,0 +1,1015 @@
+-- ================= Neon Tracker v9.4 (Auto-Attack + Infinite Ammo) =================
+-- 矮胖UI | 大头 | UI自定义 | 自动攻击(光环) | 无限子弹(免换弹) | 顶部横幅
+--
+-- 使用方式：把本文件内容整个丢进你的 Lua 执行器即可。
+-- 说明：本脚本为原始代码的直接归档，未做任何逻辑改动。
+-- ==================================================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local VirtualUser = game:GetService("VirtualUser")
+
+-- ============ 密码与状态 ============
+local SECRET = "919878"
+local isUnlocked = false
+local ballClickCount = 0
+
+-- ============ 全局配置 ============
+local Config = {
+	AutoTrack = false,
+	TrackRadius = 300,
+	AimPart = "Head",
+	HitboxPhysics = false,
+	HitboxVisual = false,
+	HitboxSize = 24,
+	Noclip = false,
+	VoidProtection = false,
+	ListMode = "Blacklist",
+	PlayerList = {},
+	Smoothing = 0.6,
+	ESP = false,
+	NPCESP = false,
+	ShowFOV = false,
+	-- UI 配置
+	UIScale = 1,
+	UIColorHue = 0.75,
+	-- 自动攻击
+	AutoAttack = false,
+	AttackRadius = 30,
+	AttackCooldown = 0.1,
+	-- 无限子弹
+	InfiniteAmmo = false,
+}
+
+local currentTarget = nil
+local originalHeadData = {}
+local lastAttackTime = 0
+
+local function isInList(plr)
+	for _, n in ipairs(Config.PlayerList) do
+		if n == plr.Name or n == plr.DisplayName then return true end
+	end
+	return false
+end
+
+local function getClosestTarget()
+	local myChar = LocalPlayer.Character
+	if not myChar then return nil end
+	local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+	if not myRoot then return nil end
+
+	local myPos = myRoot.Position
+	local myTeam = LocalPlayer.Team
+	local closest, closestDist = nil, math.huge
+	local radius = Config.TrackRadius
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr == LocalPlayer then continue end
+		if myTeam and plr.Team == myTeam then continue end
+		local inList = isInList(plr)
+		if Config.ListMode == "Whitelist" then
+			if not inList then continue end
+		else
+			if inList then continue end
+		end
+
+		local char = plr.Character
+		if not char then continue end
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then continue end
+		local root = char:FindFirstChild("HumanoidRootPart")
+		if not root then continue end
+
+		local dist = (root.Position - myPos).Magnitude
+		if dist <= radius and dist < closestDist then
+			closest = char
+			closestDist = dist
+		end
+	end
+	return closest
+end
+
+-- ============ 核心：自瞄 & 自动攻击 & ESP & 无限子弹 ============
+RunService.RenderStepped:Connect(function()
+	if Config.AutoTrack then
+		currentTarget = getClosestTarget()
+	else
+		currentTarget = nil
+	end
+
+	-- 无限子弹核心逻辑：拦截工具的 Ammo/子弹属性
+	if Config.InfiniteAmmo then
+		local myChar = LocalPlayer.Character
+		if myChar then
+			local tool = myChar:FindFirstChildOfClass("Tool")
+			if tool then
+				for _, v in ipairs(tool:GetDescendants()) do
+					if v:IsA("IntValue") or v:IsA("NumberValue") then
+						local n = string.lower(v.Name)
+						if string.find(n, "ammo") or string.find(n, "clip") or string.find(n, "mag") then
+							if v.Value ~= 999 then v.Value = 999 end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- 自动攻击逻辑
+	if Config.AutoAttack and currentTarget then
+		local myChar = LocalPlayer.Character
+		local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		local targetRoot = currentTarget:FindFirstChild("HumanoidRootPart")
+
+		if myRoot and targetRoot then
+			local dist = (myRoot.Position - targetRoot.Position).Magnitude
+			if dist <= Config.AttackRadius and (os.clock() - lastAttackTime > Config.AttackCooldown) then
+				lastAttackTime = os.clock()
+				if VirtualUser then
+					VirtualUser:CaptureController()
+					VirtualUser:ClickButton1(Vector2.new(0, 0))
+				end
+			end
+		end
+	end
+
+	-- ESP
+	if Config.ESP then
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LocalPlayer and plr.Character then
+				local hl = plr.Character:FindFirstChild("TrackerESP")
+				if not hl then
+					hl = Instance.new("Highlight")
+					hl.Name = "TrackerESP"
+					hl.FillColor = Color3.fromRGB(255, 0, 128)
+					hl.OutlineColor = Color3.fromRGB(180, 0, 255)
+					hl.FillTransparency = 0.5
+					hl.OutlineTransparency = 0
+					hl.Parent = plr.Character
+				end
+			end
+		end
+	else
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr.Character then
+				local hl = plr.Character:FindFirstChild("TrackerESP")
+				if hl then hl:Destroy() end
+			end
+		end
+	end
+
+	if Config.NPCESP then
+		for _, obj in ipairs(Workspace:GetDescendants()) do
+			if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
+				local isPlayerChar = false
+				for _, plr in ipairs(Players:GetPlayers()) do
+					if plr.Character == obj then isPlayerChar = true break end
+				end
+				if not isPlayerChar then
+					local hl = obj:FindFirstChild("TrackerNPCESP")
+					if not hl then
+						hl = Instance.new("Highlight")
+						hl.Name = "TrackerNPCESP"
+						hl.FillColor = Color3.fromRGB(0, 255, 130)
+						hl.OutlineColor = Color3.fromRGB(0, 180, 90)
+						hl.FillTransparency = 0.55
+						hl.OutlineTransparency = 0
+						hl.Parent = obj
+					end
+				end
+			end
+		end
+	else
+		for _, obj in ipairs(Workspace:GetDescendants()) do
+			if obj:IsA("Highlight") and obj.Name == "TrackerNPCESP" then
+				obj:Destroy()
+			end
+		end
+	end
+
+	if not currentTarget then return end
+	if UIS.TouchEnabled and #UIS:GetTouches() > 0 then return end
+
+	local aimPart = currentTarget:FindFirstChild(Config.AimPart)
+	if not aimPart then aimPart = currentTarget:FindFirstChild("HumanoidRootPart") end
+	if not aimPart then return end
+
+	local currentCFrame = Camera.CFrame
+	local targetPos = aimPart.Position
+	local newCFrame = CFrame.new(currentCFrame.Position, currentCFrame.Position + (targetPos - currentCFrame.Position).Unit)
+	Camera.CFrame = currentCFrame:Lerp(newCFrame, Config.Smoothing)
+end)
+
+-- ============ 核心：大头 ============
+RunService.Heartbeat:Connect(function()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and plr.Character then
+			local head = plr.Character:FindFirstChild("Head")
+			if head then
+				if not originalHeadData[head] then
+					originalHeadData[head] = {
+						size = head.Size,
+						transparency = head.Transparency,
+						canQuery = head.CanQuery,
+						canCollide = head.CanCollide,
+					}
+				end
+				local targetSize = originalHeadData[head].size
+				local targetQuery = originalHeadData[head].canQuery
+				local targetCollide = originalHeadData[head].canCollide
+				if Config.HitboxPhysics or Config.HitboxVisual then
+					targetSize = Vector3.new(Config.HitboxSize, Config.HitboxSize, Config.HitboxSize)
+				end
+				if Config.HitboxPhysics then
+					targetQuery = true
+					targetCollide = false
+				end
+				head.Size = targetSize
+				head.CanQuery = targetQuery
+				head.CanCollide = targetCollide
+			end
+		end
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+	if plr.Character then
+		local head = plr.Character:FindFirstChild("Head")
+		if head and originalHeadData[head] then originalHeadData[head] = nil end
+	end
+end)
+
+-- ============ 穿墙 / 防虚空 ============
+local fovCircle = Instance.new("Part")
+fovCircle.Name = "FOVCircle"
+fovCircle.Shape = Enum.PartType.Ball
+fovCircle.Material = Enum.Material.ForceField
+fovCircle.Color = Color3.fromRGB(180, 0, 255)
+fovCircle.Transparency = 1
+fovCircle.CanCollide = false
+fovCircle.CanQuery = false
+fovCircle.Anchored = true
+fovCircle.Parent = Workspace
+
+RunService.Stepped:Connect(function()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	if Config.ShowFOV then
+		fovCircle.Size = Vector3.new(Config.TrackRadius * 2, Config.TrackRadius * 2, Config.TrackRadius * 2)
+		fovCircle.CFrame = hrp.CFrame
+		fovCircle.Transparency = 0.85
+	else
+		fovCircle.Transparency = 1
+	end
+
+	if Config.Noclip then
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") and part.CanCollide then part.CanCollide = false end
+		end
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then hum:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, true) end
+	end
+
+	if Config.VoidProtection and hrp.Position.Y < -50 then
+		hrp.CFrame = CFrame.new(hrp.Position.X, 50, hrp.Position.Z)
+		local humanoid = char:FindFirstChildOfClass("Humanoid")
+		if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end
+	end
+end)
+
+local function safeDisableNoclip()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+	hrp.CFrame = hrp.CFrame + Vector3.new(0, 3, 0)
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then part.CanCollide = true end
+	end
+end
+
+-- ====================================================
+-- ================== UI 部分 =========================
+-- ====================================================
+
+if game.CoreGui:FindFirstChild("TrackerUI") then
+	game.CoreGui.TrackerUI:Destroy()
+end
+
+local parentGui = (gethui and gethui()) or game.CoreGui
+local gui = Instance.new("ScreenGui")
+gui.Name = "TrackerUI"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 999999
+gui.Parent = parentGui
+
+local uiScaleObj = Instance.new("UIScale")
+uiScaleObj.Scale = Config.UIScale
+uiScaleObj.Parent = gui
+
+local BOUNCE_OUT = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local QUICK_BOUNCE = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+local function getThemeColor()
+	return Color3.fromHSV(Config.UIColorHue, 1, 1)
+end
+local function getThemeColor2()
+	return Color3.fromHSV((Config.UIColorHue + 0.15) % 1, 1, 1)
+end
+
+local function showToggleNotification(label, isOn)
+	local notif = Instance.new("Frame")
+	notif.Size = UDim2.new(0, 0, 0, 42)
+	notif.Position = UDim2.new(1, -220, 1, -200)
+	notif.AnchorPoint = Vector2.new(0, 0.5)
+	notif.BackgroundColor3 = Color3.fromRGB(20, 15, 35)
+	notif.BackgroundTransparency = 0.25
+	notif.BorderSizePixel = 0
+	notif.Active = false
+	notif.ZIndex = 50
+	notif.Parent = gui
+	Instance.new("UICorner", notif).CornerRadius = UDim.new(0, 10)
+	local notifStroke = Instance.new("UIStroke")
+	notifStroke.Thickness = 1.5
+	notifStroke.Transparency = 0.2
+	notifStroke.Parent = notif
+	local notifGrad = Instance.new("UIGradient")
+	notifGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, getThemeColor()),
+		ColorSequenceKeypoint.new(1, getThemeColor2()),
+	})
+	notifGrad.Parent = notifStroke
+	local glass = Instance.new("Frame")
+	glass.Size = UDim2.new(1, 0, 0.5, 0)
+	glass.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	glass.BackgroundTransparency = 0.88
+	glass.BorderSizePixel = 0
+	glass.ZIndex = 51
+	glass.Parent = notif
+	Instance.new("UICorner", glass).CornerRadius = UDim.new(0, 10)
+	local dot = Instance.new("Frame")
+	dot.Size = UDim2.new(0, 10, 0, 10)
+	dot.Position = UDim2.new(0, 14, 0.5, -5)
+	dot.BackgroundColor3 = isOn and Color3.fromRGB(0, 255, 130) or Color3.fromRGB(255, 80, 80)
+	dot.BorderSizePixel = 0
+	dot.ZIndex = 52
+	dot.Parent = notif
+	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+	local txt = Instance.new("TextLabel")
+	txt.Size = UDim2.new(1, -34, 1, 0)
+	txt.Position = UDim2.new(0, 30, 0, 0)
+	txt.BackgroundTransparency = 1
+	txt.Text = label .. (isOn and " 已开启" or " 已关闭")
+	txt.TextColor3 = isOn and Color3.fromRGB(200, 255, 220) or Color3.fromRGB(255, 200, 200)
+	txt.Font = Enum.Font.GothamBold
+	txt.TextSize = 13
+	txt.TextXAlignment = Enum.TextXAlignment.Left
+	txt.ZIndex = 52
+	txt.Parent = notif
+	TweenService:Create(notif, BOUNCE_OUT, { Size = UDim2.new(0, 200, 0, 42) }):Play()
+	task.spawn(function()
+		task.wait(1.5)
+		local fade = TweenService:Create(
+			notif,
+			TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1, Size = UDim2.new(0, 0, 0, 42) }
+		)
+		fade:Play()
+		for _, child in ipairs(notif:GetDescendants()) do
+			if child:IsA("TextLabel") then
+				TweenService:Create(child, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+			elseif child:IsA("Frame") and child ~= notif then
+				TweenService:Create(child, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+			elseif child:IsA("UIStroke") then
+				TweenService:Create(child, TweenInfo.new(0.3), { Transparency = 1 }):Play()
+			end
+		end
+		fade.Completed:Connect(function() notif:Destroy() end)
+	end)
+end
+
+local ball = Instance.new("TextButton")
+ball.Size = UDim2.new(0, 60, 0, 60)
+ball.Position = UDim2.new(0, 50, 0, 250)
+ball.BackgroundColor3 = Color3.fromRGB(10, 8, 16)
+ball.Text = ""
+ball.AutoButtonColor = false
+ball.BorderSizePixel = 0
+ball.Parent = gui
+Instance.new("UICorner", ball).CornerRadius = UDim.new(1, 0)
+
+local ballStroke = Instance.new("UIStroke")
+ballStroke.Thickness = 2
+ballStroke.Transparency = 0.15
+ballStroke.Parent = ball
+local ballGrad = Instance.new("UIGradient")
+ballGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, getThemeColor()),
+	ColorSequenceKeypoint.new(1, getThemeColor2()),
+})
+ballGrad.Parent = ballStroke
+
+local ballIcon = Instance.new("TextLabel")
+ballIcon.Size = UDim2.new(1, 0, 1, 0)
+ballIcon.BackgroundTransparency = 1
+ballIcon.Text = "◎"
+ballIcon.TextColor3 = getThemeColor()
+ballIcon.Font = Enum.Font.GothamBold
+ballIcon.TextSize = 30
+ballIcon.Parent = ball
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, 320, 0, 520)
+panel.Position = UDim2.new(0, 150, 0, 130)
+panel.BackgroundColor3 = Color3.fromRGB(10, 8, 16)
+panel.BackgroundTransparency = 0.08
+panel.BorderSizePixel = 0
+panel.Visible = false
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+
+local panelStroke = Instance.new("UIStroke")
+panelStroke.Thickness = 1.5
+panelStroke.Transparency = 0.4
+panelStroke.Parent = panel
+local psGrad = Instance.new("UIGradient")
+psGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, getThemeColor()),
+	ColorSequenceKeypoint.new(1, getThemeColor2()),
+})
+psGrad.Parent = panelStroke
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundTransparency = 1
+titleBar.ZIndex = 2
+titleBar.Parent = panel
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -50, 1, 0)
+title.Position = UDim2.new(0, 14, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "TRACKER v9.4"
+title.TextColor3 = getThemeColor()
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = titleBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 32, 0, 32)
+closeBtn.Position = UDim2.new(1, -40, 0.5, -16)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 20
+closeBtn.AutoButtonColor = false
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = titleBar
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+local banner = Instance.new("Frame")
+banner.Size = UDim2.new(1, 0, 0, 60)
+banner.Position = UDim2.new(0, 0, 0, 40)
+banner.BackgroundColor3 = Color3.fromRGB(40, 0, 0)
+banner.BorderSizePixel = 0
+banner.Parent = panel
+
+local bannerGrad = Instance.new("UIGradient")
+bannerGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 0, 0)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(150, 0, 0)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(40, 0, 0)),
+})
+bannerGrad.Rotation = 90
+bannerGrad.Parent = banner
+
+local bannerText = Instance.new("TextLabel")
+bannerText.Size = UDim2.new(1, -20, 1, 0)
+bannerText.Position = UDim2.new(0, 10, 0, 0)
+bannerText.BackgroundTransparency = 1
+bannerText.Text = "🩸 hjy 制作 🩸"
+bannerText.TextColor3 = Color3.fromRGB(255, 100, 100)
+bannerText.Font = Enum.Font.GothamBlack
+bannerText.TextSize = 22
+bannerText.TextStrokeTransparency = 0.5
+bannerText.Parent = banner
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, 0, 1, -100)
+scroll.Position = UDim2.new(0, 0, 0, 100)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 4
+scroll.ScrollBarImageColor3 = getThemeColor()
+scroll.CanvasSize = UDim2.new(0, 0, 0, 900)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.Parent = panel
+
+local function createToggle(yPos, labelText, getter, setter)
+	local row = Instance.new("TextButton")
+	row.Size = UDim2.new(1, -20, 0, 35)
+	row.Position = UDim2.new(0, 10, 0, yPos)
+	row.BackgroundColor3 = Color3.fromRGB(25, 18, 40)
+	row.Text = ""
+	row.AutoButtonColor = false
+	row.BorderSizePixel = 0
+	row.Parent = scroll
+	Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -100, 1, 0)
+	lbl.Position = UDim2.new(0, 12, 0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = labelText
+	lbl.TextColor3 = Color3.fromRGB(220, 230, 255)
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextSize = 12
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = row
+
+	local state = Instance.new("TextLabel")
+	state.Size = UDim2.new(0, 40, 1, 0)
+	state.Position = UDim2.new(1, -50, 0, 0)
+	state.BackgroundTransparency = 1
+	state.Text = getter() and "ON" or "OFF"
+	state.TextColor3 = getter() and Color3.fromRGB(0, 255, 130) or Color3.fromRGB(255, 80, 80)
+	state.Font = Enum.Font.GothamBold
+	state.TextSize = 12
+	state.TextXAlignment = Enum.TextXAlignment.Right
+	state.Parent = row
+
+	local function updateUI()
+		state.Text = getter() and "ON" or "OFF"
+		state.TextColor3 = getter() and Color3.fromRGB(0, 255, 130) or Color3.fromRGB(255, 80, 80)
+	end
+
+	row.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			setter(not getter())
+			updateUI()
+			TweenService:Create(
+				row,
+				QUICK_BOUNCE,
+				{ BackgroundColor3 = getter() and Color3.fromRGB(35, 25, 55) or Color3.fromRGB(25, 18, 40) }
+			):Play()
+			showToggleNotification(labelText, getter())
+		end
+	end)
+	return updateUI
+end
+
+local updateTrackUI = createToggle(10, "自动追踪", function() return Config.AutoTrack end, function(v) Config.AutoTrack = v end)
+local updatePhysUI = createToggle(50, "物理大头 (判定)", function() return Config.HitboxPhysics end, function(v) Config.HitboxPhysics = v end)
+local updateVisUI = createToggle(90, "视觉大头 (外观)", function() return Config.HitboxVisual end, function(v) Config.HitboxVisual = v end)
+local updateAttackUI = createToggle(130, "自动攻击 (光环)", function() return Config.AutoAttack end, function(v) Config.AutoAttack = v end)
+local updateAmmoUI = createToggle(170, "无限子弹 (免换弹)", function() return Config.InfiniteAmmo end, function(v) Config.InfiniteAmmo = v end)
+local updateNoclipUI = createToggle(210, "穿墙模式", function() return Config.Noclip end, function(v) Config.Noclip = v; if not v then safeDisableNoclip() end end)
+local updateVoidUI = createToggle(250, "防掉虚空", function() return Config.VoidProtection end, function(v) Config.VoidProtection = v end)
+local updateESPUI = createToggle(290, "ESP 玩家透视", function() return Config.ESP end, function(v) Config.ESP = v end)
+local updateNPCUI = createToggle(330, "ESP NPC透视", function() return Config.NPCESP end, function(v) Config.NPCESP = v end)
+local updateFOVUI = createToggle(370, "FOV 圈", function() return Config.ShowFOV end, function(v) Config.ShowFOV = v end)
+
+-- 瞄准部位
+local aimRow = Instance.new("Frame")
+aimRow.Size = UDim2.new(1, -20, 0, 35)
+aimRow.Position = UDim2.new(0, 10, 0, 410)
+aimRow.BackgroundColor3 = Color3.fromRGB(25, 18, 40)
+aimRow.BorderSizePixel = 0
+aimRow.Parent = scroll
+Instance.new("UICorner", aimRow).CornerRadius = UDim.new(0, 10)
+
+local aimLabel = Instance.new("TextLabel")
+aimLabel.Size = UDim2.new(0, 80, 1, 0)
+aimLabel.Position = UDim2.new(0, 12, 0, 0)
+aimLabel.BackgroundTransparency = 1
+aimLabel.Text = "瞄准部位"
+aimLabel.TextColor3 = Color3.fromRGB(220, 230, 255)
+aimLabel.Font = Enum.Font.GothamBold
+aimLabel.TextSize = 12
+aimLabel.TextXAlignment = Enum.TextXAlignment.Left
+aimLabel.Parent = aimRow
+
+local headBtn = Instance.new("TextButton")
+headBtn.Size = UDim2.new(0, 60, 0, 22)
+headBtn.Position = UDim2.new(1, -134, 0.5, -11)
+headBtn.Text = "头部"
+headBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+headBtn.Font = Enum.Font.GothamBold
+headBtn.TextSize = 11
+headBtn.AutoButtonColor = false
+headBtn.BorderSizePixel = 0
+headBtn.Parent = aimRow
+Instance.new("UICorner", headBtn).CornerRadius = UDim.new(0, 5)
+
+local bodyBtn = Instance.new("TextButton")
+bodyBtn.Size = UDim2.new(0, 60, 0, 22)
+bodyBtn.Position = UDim2.new(1, -68, 0.5, -11)
+bodyBtn.Text = "身体"
+bodyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+bodyBtn.Font = Enum.Font.GothamBold
+bodyBtn.TextSize = 11
+bodyBtn.AutoButtonColor = false
+bodyBtn.BorderSizePixel = 0
+bodyBtn.Parent = aimRow
+Instance.new("UICorner", bodyBtn).CornerRadius = UDim.new(0, 5)
+
+local function updateAimUI()
+	local isHead = Config.AimPart == "Head"
+	TweenService:Create(headBtn, QUICK_BOUNCE, { BackgroundColor3 = isHead and getThemeColor() or Color3.fromRGB(40, 46, 62) }):Play()
+	TweenService:Create(bodyBtn, QUICK_BOUNCE, { BackgroundColor3 = (not isHead) and getThemeColor() or Color3.fromRGB(40, 46, 62) }):Play()
+end
+updateAimUI()
+
+headBtn.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		Config.AimPart = "Head"
+		updateAimUI()
+	end
+end)
+bodyBtn.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		Config.AimPart = "HumanoidRootPart"
+		updateAimUI()
+	end
+end)
+
+local function createSlider(yPos, labelText, min, max, initVal, callback)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, -20, 0, 45)
+	row.Position = UDim2.new(0, 10, 0, yPos)
+	row.BackgroundColor3 = Color3.fromRGB(25, 18, 40)
+	row.BorderSizePixel = 0
+	row.Parent = scroll
+	Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -24, 0, 18)
+	lbl.Position = UDim2.new(0, 12, 0, 2)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = labelText .. ": " .. initVal
+	lbl.TextColor3 = Color3.fromRGB(200, 150, 255)
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextSize = 11
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = row
+
+	local range = max - min
+	local track = Instance.new("Frame")
+	track.Size = UDim2.new(1, -24, 0, 6)
+	track.Position = UDim2.new(0, 12, 1, -14)
+	track.BackgroundColor3 = Color3.fromRGB(40, 50, 70)
+	track.BorderSizePixel = 0
+	track.Parent = row
+	Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new((initVal - min) / range, 0, 1, 0)
+	fill.BackgroundColor3 = getThemeColor()
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.new(0, 12, 0, 12)
+	knob.Position = UDim2.new((initVal - min) / range, -6, 0.5, -6)
+	knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	knob.BorderSizePixel = 0
+	knob.ZIndex = 2
+	knob.Parent = track
+	Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+	local dragging = false
+	local function updateSlider(inputX)
+		local relX = math.clamp((inputX - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+		local val = min + relX * range
+		callback(val, relX)
+		fill.Size = UDim2.new(relX, 0, 1, 0)
+		knob.Position = UDim2.new(relX, -8, 0.5, -8)
+		lbl.Text = labelText .. ": " .. math.floor(val * 100 + 0.5) / 100
+	end
+
+	track.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			updateSlider(input.Position.X)
+			TweenService:Create(knob, QUICK_BOUNCE, { Size = UDim2.new(0, 16, 0, 16) }):Play()
+		end
+	end)
+	UIS.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			updateSlider(input.Position.X)
+		end
+	end)
+	UIS.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			if dragging then
+				dragging = false
+				TweenService:Create(knob, QUICK_BOUNCE, { Size = UDim2.new(0, 12, 0, 12) }):Play()
+			end
+		end
+	end)
+end
+
+createSlider(455, "追踪半径", 50, 1500, Config.TrackRadius, function(val)
+	Config.TrackRadius = math.floor(val / 10 + 0.5) * 10
+end)
+
+createSlider(505, "自动攻击范围", 5, 150, Config.AttackRadius, function(val)
+	Config.AttackRadius = math.floor(val + 0.5)
+end)
+
+createSlider(555, "大头倍数", 10, 60, Config.HitboxSize, function(val)
+	Config.HitboxSize = math.floor(val + 0.5)
+end)
+
+createSlider(605, "瞄准平滑度", 0.1, 1.0, Config.Smoothing, function(val)
+	Config.Smoothing = math.floor(val * 100 + 0.5) / 100
+end)
+
+createSlider(655, "UI 大小缩放", 0.5, 1.5, Config.UIScale, function(val)
+	Config.UIScale = math.floor(val * 100 + 0.5) / 100
+	uiScaleObj.Scale = Config.UIScale
+end)
+
+createSlider(705, "UI 主题颜色", 0, 1, Config.UIColorHue, function(val)
+	Config.UIColorHue = val
+	local c1 = getThemeColor()
+	local c2 = getThemeColor2()
+	psGrad.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, c1), ColorSequenceKeypoint.new(1, c2) })
+	ballGrad.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, c1), ColorSequenceKeypoint.new(1, c2) })
+	ballIcon.TextColor3 = c1
+	title.TextColor3 = c1
+	scroll.ScrollBarImageColor3 = c1
+	updateAimUI()
+end)
+
+-- ============ 密码弹窗 ============
+local passOverlay = Instance.new("Frame")
+passOverlay.Size = UDim2.new(1, 0, 1, 0)
+passOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+passOverlay.BackgroundTransparency = 0.6
+passOverlay.BorderSizePixel = 0
+passOverlay.Visible = false
+passOverlay.ZIndex = 60
+passOverlay.Parent = gui
+
+local passBox = Instance.new("Frame")
+passBox.Size = UDim2.new(0, 240, 0, 160)
+passBox.Position = UDim2.new(0.5, -120, 0.5, -80)
+passBox.BackgroundColor3 = Color3.fromRGB(10, 8, 16)
+passBox.BorderSizePixel = 0
+passBox.ZIndex = 61
+passBox.Parent = passOverlay
+Instance.new("UICorner", passBox).CornerRadius = UDim.new(0, 12)
+
+local pbTitle = Instance.new("TextLabel")
+pbTitle.Size = UDim2.new(1, -20, 0, 26)
+pbTitle.Position = UDim2.new(0, 14, 0, 10)
+pbTitle.BackgroundTransparency = 1
+pbTitle.Text = "◆ 密码验证"
+pbTitle.TextColor3 = getThemeColor()
+pbTitle.Font = Enum.Font.GothamBold
+pbTitle.TextSize = 13
+pbTitle.TextXAlignment = Enum.TextXAlignment.Left
+pbTitle.ZIndex = 62
+pbTitle.Parent = passBox
+
+local pbInput = Instance.new("TextBox")
+pbInput.Size = UDim2.new(1, -28, 0, 36)
+pbInput.Position = UDim2.new(0, 14, 0, 46)
+pbInput.BackgroundColor3 = Color3.fromRGB(25, 30, 45)
+pbInput.BorderSizePixel = 0
+pbInput.Text = ""
+pbInput.PlaceholderText = "请输入密码"
+pbInput.PlaceholderColor3 = Color3.fromRGB(110, 130, 160)
+pbInput.TextColor3 = Color3.fromRGB(230, 240, 255)
+pbInput.Font = Enum.Font.GothamMedium
+pbInput.TextSize = 13
+pbInput.ClearTextOnFocus = false
+pbInput.TextEditable = true
+pbInput.Selectable = true
+pbInput.ZIndex = 62
+pbInput.Parent = passBox
+Instance.new("UICorner", pbInput).CornerRadius = UDim.new(0, 8)
+
+local pbErr = Instance.new("TextLabel")
+pbErr.Size = UDim2.new(1, -28, 0, 14)
+pbErr.Position = UDim2.new(0, 14, 0, 86)
+pbErr.BackgroundTransparency = 1
+pbErr.Text = ""
+pbErr.TextColor3 = Color3.fromRGB(255, 90, 90)
+pbErr.Font = Enum.Font.GothamMedium
+pbErr.TextSize = 10
+pbErr.TextXAlignment = Enum.TextXAlignment.Left
+pbErr.ZIndex = 62
+pbErr.Parent = passBox
+
+local pbOk = Instance.new("TextButton")
+pbOk.Size = UDim2.new(0, 95, 0, 32)
+pbOk.Position = UDim2.new(1, -109, 1, -45)
+pbOk.BackgroundColor3 = getThemeColor()
+pbOk.Text = "确认"
+pbOk.TextColor3 = Color3.fromRGB(255, 255, 255)
+pbOk.Font = Enum.Font.GothamBold
+pbOk.TextSize = 12
+pbOk.AutoButtonColor = false
+pbOk.BorderSizePixel = 0
+pbOk.ZIndex = 62
+pbOk.Parent = passBox
+Instance.new("UICorner", pbOk).CornerRadius = UDim.new(0, 8)
+
+local pbCancel = Instance.new("TextButton")
+pbCancel.Size = UDim2.new(0, 70, 0, 32)
+pbCancel.Position = UDim2.new(1, -189, 1, -45)
+pbCancel.BackgroundColor3 = Color3.fromRGB(40, 46, 62)
+pbCancel.Text = "取消"
+pbCancel.TextColor3 = Color3.fromRGB(200, 210, 230)
+pbCancel.Font = Enum.Font.GothamBold
+pbCancel.TextSize = 12
+pbCancel.AutoButtonColor = false
+pbCancel.BorderSizePixel = 0
+pbCancel.ZIndex = 62
+pbCancel.Parent = passBox
+Instance.new("UICorner", pbCancel).CornerRadius = UDim.new(0, 8)
+
+local function openPass()
+	pbInput.Text = ""
+	pbErr.Text = ""
+	passOverlay.Visible = true
+	task.wait(0.2)
+	pbInput:CaptureFocus()
+end
+
+local function closePass()
+	passOverlay.Visible = false
+	pbInput:ReleaseFocus()
+end
+
+local function shake(frame)
+	local base = frame.Position
+	for i = 1, 4 do
+		TweenService:Create(frame, TweenInfo.new(0.05), { Position = base + UDim2.new(0, (i % 2 == 0 and -6 or 6), 0, 0) }):Play()
+		task.wait(0.05)
+	end
+	TweenService:Create(frame, TweenInfo.new(0.05), { Position = base }):Play()
+end
+
+local function unlockAndOpen()
+	isUnlocked = true
+	ballClickCount = 0
+	closePass()
+	panel.Visible = true
+	panel.Size = UDim2.new(0, 0, 0, 0)
+	panel.Position = UDim2.new(0.5, -160, 0.5, -260)
+	TweenService:Create(panel, BOUNCE_OUT, { Size = UDim2.new(0, 320, 0, 520) }):Play()
+	ball.Visible = true
+	TweenService:Create(ball, QUICK_BOUNCE, { Size = UDim2.new(0, 60, 0, 60), Position = UDim2.new(0, 110, 0, 120) }):Play()
+end
+
+local function tryUnlock()
+	local entered = pbInput.Text
+	entered = entered:gsub("%s", "")
+	entered = entered:gsub("０", "0"):gsub("１", "1"):gsub("２", "2"):gsub("３", "3"):gsub("４", "4"):gsub("５", "5"):gsub("６", "6"):gsub("７", "7"):gsub("８", "8"):gsub("９", "9")
+	entered = entered:gsub("%D", "")
+	if entered == SECRET then
+		unlockAndOpen()
+	else
+		pbErr.Text = "密码错误，请重试"
+		pbInput.Text = ""
+		shake(passBox)
+	end
+end
+
+pbOk.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		tryUnlock()
+	end
+end)
+pbInput.FocusLost:Connect(function(enter) if enter then tryUnlock() end end)
+pbCancel.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		closePass()
+	end
+end)
+
+-- ============ 触摸与拖拽 ============
+local function makeDraggable(frame, dragHandle)
+	local dragging, dragInput, dragStart, startPos
+	dragHandle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = frame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	dragHandle.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+	UIS.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+makeDraggable(panel, titleBar)
+
+local ballHoldStart = 0
+local ballMoved = false
+local ballDragging = false
+local ballDragStart, ballStartPos
+
+ball.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		ballHoldStart = os.clock()
+		ballMoved = false
+		ballDragging = true
+		ballDragStart = input.Position
+		ballStartPos = ball.Position
+		TweenService:Create(ball, QUICK_BOUNCE, { Size = UDim2.new(0, 48, 0, 48) }):Play()
+	end
+end)
+
+UIS.InputChanged:Connect(function(input)
+	if ballDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - ballDragStart
+		if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then ballMoved = true end
+		if ballMoved then
+			ball.Position = UDim2.new(ballStartPos.X.Scale, ballStartPos.X.Offset + delta.X, ballStartPos.Y.Scale, ballStartPos.Y.Offset + delta.Y)
+		end
+	end
+end)
+
+UIS.InputEnded:Connect(function(input)
+	if ballDragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+		ballDragging = false
+		TweenService:Create(ball, QUICK_BOUNCE, { Size = UDim2.new(0, 60, 0, 60) }):Play()
+
+		local holdTime = os.clock() - ballHoldStart
+		if holdTime < 0.3 and not ballMoved then
+			ballClickCount = ballClickCount + 1
+			if ballClickCount >= 5 then
+				unlockAndOpen()
+				return
+			end
+
+			if not isUnlocked then
+				openPass()
+			else
+				if panel.Visible then
+					panel.Visible = false
+				else
+					panel.Visible = true
+					panel.Size = UDim2.new(0, 0, 0, 0)
+					panel.Position = UDim2.new(0.5, -160, 0.5, -260)
+					TweenService:Create(panel, BOUNCE_OUT, { Size = UDim2.new(0, 320, 0, 520) }):Play()
+				end
+			end
+		end
+	end
+end)
+
+closeBtn.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		panel.Visible = false
+		TweenService:Create(ball, QUICK_BOUNCE, { Size = UDim2.new(0, 60, 0, 60) }):Play()
+	end
+end)
+
+UIS.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		if not panel.Visible then return end
+		local mousePos = input.Position
+		local pX, pY = panel.AbsolutePosition.X, panel.AbsolutePosition.Y
+		local pW, pH = panel.AbsoluteSize.X, panel.AbsoluteSize.Y
+		local inPanel = mousePos.X >= pX and mousePos.X <= pX + pW and mousePos.Y >= pY and mousePos.Y <= pY + pH
+		local bX, bY = ball.AbsolutePosition.X, ball.AbsolutePosition.Y
+		local bW, bH = ball.AbsoluteSize.X, ball.AbsoluteSize.Y
+		local inBall = mousePos.X >= bX and mousePos.X <= bX + bW and mousePos.Y >= bY and mousePos.Y <= bY + bH
+		if not inPanel and not inBall then
+			panel.Visible = false
+			TweenService:Create(ball, QUICK_BOUNCE, { Size = UDim2.new(0, 60, 0, 60) }):Play()
+		end
+	end
+end)
+
+print("[Neon Tracker v9.4] 已加载 | 无限子弹已接入 | 自动攻击就绪")
